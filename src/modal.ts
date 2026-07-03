@@ -28,6 +28,7 @@ export class MermaidImageModal extends Modal {
     super(app);
     this.svg = svg;
     this.settings = settings;
+    this.scale = settings.defaultZoomLevel / 100;
     this.modalEl.addClass('better-mermaid-modal-size');
   }
 
@@ -58,12 +59,15 @@ export class MermaidImageModal extends Modal {
       option.value = String(opt.value);
       option.text = opt.label;
     });
-    this.zoomSelect.value = '1';
+    this.zoomSelect.value = String(this.scale);
     this.zoomSelect.addEventListener('change', () => {
       const gen = this.zoomSelect.querySelector('[data-generated]');
       if (gen) gen.remove();
       this.setZoom(parseFloat(this.zoomSelect.value));
     });
+
+    this.applyTransform();
+    this.syncZoomDisplay(this.scale);
 
     const btn = controls.createEl('button', { text: this.t('downloadPng') });
     btn.addEventListener('click', () => {

@@ -7,6 +7,7 @@ export interface BetterMermaidSettings {
   enableClickToZoom: boolean;
   modalWidthPercent: number;
   modalHeightPercent: number;
+  defaultZoomLevel: number;
 }
 
 export const DEFAULT_SETTINGS: BetterMermaidSettings = {
@@ -15,6 +16,7 @@ export const DEFAULT_SETTINGS: BetterMermaidSettings = {
   enableClickToZoom: true,
   modalWidthPercent: 80,
   modalHeightPercent: 80,
+  defaultZoomLevel: 100,
 };
 
 const STRINGS: Record<string, Record<string, string>> = {
@@ -35,6 +37,8 @@ const STRINGS: Record<string, Record<string, string>> = {
     downloadPng: 'Download PNG',
     zoom: 'Zoom',
     converting: 'Converting...',
+    defaultZoomLevel: 'Default zoom level',
+    defaultZoomLevelDesc: 'Initial zoom level when opening a Mermaid diagram (percentage)',
   },
   zh: {
     settingsTitle: 'Better Mermaid 设置',
@@ -53,6 +57,8 @@ const STRINGS: Record<string, Record<string, string>> = {
     downloadPng: '下载 PNG',
     zoom: '缩放',
     converting: '转换中...',
+    defaultZoomLevel: '默认缩放级别',
+    defaultZoomLevelDesc: '打开 Mermaid 图表时的初始缩放级别（百分比）',
   },
 };
 
@@ -105,52 +111,80 @@ export class BetterMermaidSettingTab extends PluginSettingTab {
         })
       );
 
-    new Setting(containerEl)
-      .setName(this.t('modalWidth'))
-      .setDesc(this.t('modalWidthDesc'))
-      .addSlider((slider) =>
-        slider
-          .setLimits(30, 100, 5)
-          .setValue(s.modalWidthPercent)
-          .onChange(async (value) => {
-            s.modalWidthPercent = value;
-            await this.plugin.saveSettings();
-          })
-      )
-      .addButton((btn) =>
-        btn
-          .setButtonText(this.t('reset'))
-          .onClick(async () => {
-            s.modalWidthPercent = DEFAULT_SETTINGS.modalWidthPercent;
-            await this.plugin.saveSettings();
-            this.display();
-          })
-      );
+	    const modalWidthSetting = new Setting(containerEl)
+	      .setName(this.t('modalWidth'))
+	      .setDesc(`${this.t('modalWidthDesc')} (${s.modalWidthPercent}%)`)
+	      .addSlider((slider) =>
+	        slider
+	          .setLimits(30, 100, 5)
+	          .setValue(s.modalWidthPercent)
+	          .setDynamicTooltip()
+	          .onChange(async (value) => {
+	            s.modalWidthPercent = value;
+	            modalWidthSetting.descEl.innerText = `${this.t('modalWidthDesc')} (${value}%)`;
+	            await this.plugin.saveSettings();
+	          })
+	      )
+	      .addButton((btn) =>
+	        btn
+	          .setButtonText(this.t('reset'))
+	          .onClick(async () => {
+	            s.modalWidthPercent = DEFAULT_SETTINGS.modalWidthPercent;
+	            await this.plugin.saveSettings();
+	            this.display();
+	          })
+	      );
 
-    new Setting(containerEl)
-      .setName(this.t('modalHeight'))
-      .setDesc(this.t('modalHeightDesc'))
-      .addSlider((slider) =>
-        slider
-          .setLimits(30, 100, 5)
-          .setValue(s.modalHeightPercent)
-          .onChange(async (value) => {
-            s.modalHeightPercent = value;
-            await this.plugin.saveSettings();
-          })
-      )
-      .addButton((btn) =>
-        btn
-          .setButtonText(this.t('reset'))
-          .onClick(async () => {
-            s.modalHeightPercent = DEFAULT_SETTINGS.modalHeightPercent;
-            await this.plugin.saveSettings();
-            this.display();
-          })
-      );
+	    const modalHeightSetting = new Setting(containerEl)
+	      .setName(this.t('modalHeight'))
+	      .setDesc(`${this.t('modalHeightDesc')} (${s.modalHeightPercent}%)`)
+		      .addSlider((slider) =>
+		        slider
+		          .setLimits(30, 100, 5)
+		          .setValue(s.modalHeightPercent)
+		          .setDynamicTooltip()
+		          .onChange(async (value) => {
+		            s.modalHeightPercent = value;
+		            modalHeightSetting.descEl.innerText = `${this.t('modalHeightDesc')} (${value}%)`;
+		            await this.plugin.saveSettings();
+		          })
+		      )
+			      .addButton((btn) =>
+		        btn
+		          .setButtonText(this.t('reset'))
+		          .onClick(async () => {
+		            s.modalHeightPercent = DEFAULT_SETTINGS.modalHeightPercent;
+		            await this.plugin.saveSettings();
+		            this.display();
+		          })
+		      );
 
-    new Setting(containerEl)
-      .setName(this.t('customCss'))
+		    const zoomSetting = new Setting(containerEl)
+		      .setName(this.t('defaultZoomLevel'))
+		      .setDesc(`${this.t('defaultZoomLevelDesc')} (${s.defaultZoomLevel}%)`)
+			    .addSlider((slider) =>
+			        slider
+			          .setLimits(20, 200, 5)
+			          .setValue(s.defaultZoomLevel)
+			          .setDynamicTooltip()
+			          .onChange(async (value) => {
+			            s.defaultZoomLevel = value;
+			            zoomSetting.descEl.innerText = `${this.t('defaultZoomLevelDesc')} (${value}%)`;
+			            await this.plugin.saveSettings();
+			          })
+			      )
+		      .addButton((btn) =>
+		        btn
+		          .setButtonText(this.t('reset'))
+		          .onClick(async () => {
+		            s.defaultZoomLevel = DEFAULT_SETTINGS.defaultZoomLevel;
+		            await this.plugin.saveSettings();
+		            this.display();
+		          })
+		      );
+
+	    new Setting(containerEl)
+	      .setName(this.t('customCss'))
       .setDesc(this.t('customCssDesc'))
       .addTextArea((textarea) =>
         textarea
