@@ -1,0 +1,8 @@
+{
+  "language": "zh",
+  "customCss": "",
+  "enableClickToZoom": true,
+  "modalWidthPercent": 75,
+  "modalHeightPercent": 75,
+  "defaultZoomLevel": 100
+}
