@@ -1,0 +1,61 @@
+name: Release Obsidian Plugin
+
+# 推送版本标签（如 1.0.6 或 v1.0.6）即自动创建 GitHub Release
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 标签必须与 manifest.json 的 version 一致（允许可选的 v 前缀）
+      - name: Check tag matches manifest version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION=$(jq -r '.version' manifest.json)
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "::error::Tag \"$GITHUB_REF_NAME\" (normalized: $TAG) does not match manifest.json version \"$VERSION\""
+            exit 1
+          fi
+
+      - name: Check release files exist
+        run: |
+          for file in main.js manifest.json styles.css; do
+            if [ ! -f "$file" ]; then
+              echo "::error::Required file missing: $file"
+              exit 1
+            fi
+          done
+
+      # Obsidian 更新检查所需；version -> minAppVersion 映射
+      - name: Generate versions.json
+        run: |
+          MIN_APP_VERSION=$(jq -r '.minAppVersion' manifest.json)
+          VERSION="${GITHUB_REF_NAME#v}"
+          jq -n --arg version "$VERSION" --arg minAppVersion "$MIN_APP_VERSION" \
+            '{($version): {minAppVersion: $minAppVersion}}' > versions.json
+          cat versions.json
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Better Mermaid ${{ github.ref_name }}
+          generate_release_notes: true
+          body: |
+            ## 安装
+            1. 下载 `main.js`、`manifest.json`、`styles.css` 三个文件
+            2. 放入 Vault 的 `.obsidian/plugins/better-mermaid/` 目录（没有就新建）
+            3. 重启 Obsidian，在 设置 → 第三方插件 中启用 Better Mermaid
+          files: |
+            main.js
+            manifest.json
+            styles.css
+            versions.json
