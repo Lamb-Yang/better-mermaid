@@ -56,6 +56,7 @@ var STRINGS = {
     downloadPng: "Download PNG",
     zoom: "Zoom",
     converting: "Converting...",
+    downloadFailed: "Failed to export PNG",
     defaultZoomLevel: "Default zoom level",
     defaultZoomLevelDesc: "Initial zoom level when opening a Mermaid diagram (percentage)",
     fitToModal: "Fit to modal",
@@ -78,6 +79,7 @@ var STRINGS = {
     downloadPng: "\u4E0B\u8F7D PNG",
     zoom: "\u7F29\u653E",
     converting: "\u8F6C\u6362\u4E2D...",
+    downloadFailed: "PNG \u5BFC\u51FA\u5931\u8D25",
     defaultZoomLevel: "\u9ED8\u8BA4\u7F29\u653E\u7EA7\u522B",
     defaultZoomLevelDesc: "\u6253\u5F00 Mermaid \u56FE\u8868\u65F6\u7684\u521D\u59CB\u7F29\u653E\u7EA7\u522B\uFF08\u767E\u5206\u6BD4\uFF09",
     fitToModal: "\u9002\u914D\u5F39\u7A97",
@@ -172,8 +174,9 @@ var ZOOM_OPTIONS = [
   { label: "100%", value: 1 }
 ];
 var MermaidImageModal = class extends import_obsidian2.Modal {
-  constructor(app, svg, settings) {
+  constructor(app, plugin, svg, settings) {
     super(app);
+    this.plugin = plugin;
     this.scale = 1;
     this.panX = 0;
     this.panY = 0;
@@ -183,14 +186,18 @@ var MermaidImageModal = class extends import_obsidian2.Modal {
     this.panStartX = 0;
     this.panStartY = 0;
     this.sizeMode = "fit";
+    this.pointers = new Map();
+    this.pinch = null;
     this.onWheel = (e) => {
       e.preventDefault();
+      if (!this.svgEl)
+        return;
       if (e.ctrlKey) {
-        const rect = this.viewport.getBoundingClientRect();
-        const mx = e.clientX - rect.left;
-        const my = e.clientY - rect.top;
-        const factor = 1 - e.deltaY * 5e-3;
-        const newScale = Math.max(0.1, Math.min(10, this.scale * factor));
+        const origin = this.getSvgOrigin();
+        const mx = e.clientX - origin.rect.left - origin.x;
+        const my = e.clientY - origin.rect.top - origin.y;
+        const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+        const newScale = Math.max(0.1, Math.min(10, this.scale * Math.exp(-dy * 2e-3)));
         this.panX = mx - (mx - this.panX) * (newScale / this.scale);
         this.panY = my - (my - this.panY) * (newScale / this.scale);
         this.scale = newScale;
@@ -202,36 +209,90 @@ var MermaidImageModal = class extends import_obsidian2.Modal {
       }
       this.applyTransform();
     };
-    this.onMouseDown = (e) => {
-      if (e.button !== 0)
+    this.onPointerDown = (e) => {
+      if (!this.svgEl)
+        return;
+      if (e.pointerType === "mouse" && e.button !== 0)
         return;
       const target = e.target;
-      if (target.closest(".better-mermaid-controls"))
+      if (target.closest && target.closest(".better-mermaid-controls"))
         return;
-      this.isDragging = true;
-      this.dragStartX = e.clientX;
-      this.dragStartY = e.clientY;
-      this.panStartX = this.panX;
-      this.panStartY = this.panY;
-      this.viewport.addClass("better-mermaid-grabbing");
+      try {
+        this.viewport.setPointerCapture(e.pointerId);
+      } catch (err) {
+      }
+      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this.pointers.size === 1) {
+        this.isDragging = true;
+        this.dragStartX = e.clientX;
+        this.dragStartY = e.clientY;
+        this.panStartX = this.panX;
+        this.panStartY = this.panY;
+        this.viewport.addClass("better-mermaid-grabbing");
+      } else if (this.pointers.size === 2) {
+        this.isDragging = false;
+        this.startPinch();
+      }
     };
-    this.onMouseMove = (e) => {
-      if (!this.isDragging)
+    this.onPointerMove = (e) => {
+      if (!this.svgEl || !this.pointers.has(e.pointerId))
         return;
-      this.panX = this.panStartX + (e.clientX - this.dragStartX);
-      this.panY = this.panStartY + (e.clientY - this.dragStartY);
-      this.applyTransform();
+      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this.pointers.size === 2 && this.pinch) {
+        const pts = Array.from(this.pointers.values());
+        const origin = this.getSvgOrigin();
+        const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+        const newScale = Math.max(0.1, Math.min(10, this.pinch.scale * (dist / this.pinch.dist)));
+        const ratio = newScale / this.pinch.scale;
+        const mx = (pts[0].x + pts[1].x) / 2 - origin.rect.left - origin.x;
+        const my = (pts[0].y + pts[1].y) / 2 - origin.rect.top - origin.y;
+        this.panX = mx - ratio * (this.pinch.midX - this.pinch.panX);
+        this.panY = my - ratio * (this.pinch.midY - this.pinch.panY);
+        this.scale = newScale;
+        this.applyTransform();
+        this.syncZoomDisplay(newScale);
+      } else if (this.isDragging) {
+        this.panX = this.panStartX + (e.clientX - this.dragStartX);
+        this.panY = this.panStartY + (e.clientY - this.dragStartY);
+        this.applyTransform();
+      }
     };
-    this.onMouseUp = () => {
-      if (!this.isDragging)
+    this.onPointerUp = (e) => {
+      if (!this.pointers.has(e.pointerId))
         return;
-      this.isDragging = false;
-      this.viewport.removeClass("better-mermaid-grabbing");
+      this.pointers.delete(e.pointerId);
+      if (this.pointers.size === 0) {
+        this.isDragging = false;
+        this.pinch = null;
+        if (this.viewport)
+          this.viewport.removeClass("better-mermaid-grabbing");
+      } else if (this.pointers.size === 1) {
+        this.pinch = null;
+        const remaining = Array.from(this.pointers.values())[0];
+        this.isDragging = true;
+        this.dragStartX = remaining.x;
+        this.dragStartY = remaining.y;
+        this.panStartX = this.panX;
+        this.panStartY = this.panY;
+      }
     };
     this.svg = svg;
     this.settings = settings;
     this.scale = settings.defaultZoomLevel / 100;
     this.modalEl.addClass("better-mermaid-modal-size");
+  }
+  startPinch() {
+    const pts = Array.from(this.pointers.values());
+    const origin = this.getSvgOrigin();
+    const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+    this.pinch = {
+      dist,
+      scale: this.scale,
+      midX: (pts[0].x + pts[1].x) / 2 - origin.rect.left - origin.x,
+      midY: (pts[0].y + pts[1].y) / 2 - origin.rect.top - origin.y,
+      panX: this.panX,
+      panY: this.panY
+    };
   }
   t(key) {
     return i18n(this.settings.language, key);
@@ -273,21 +334,22 @@ var MermaidImageModal = class extends import_obsidian2.Modal {
     btn.addEventListener("click", () => {
       void this.handleDownload(btn);
     });
-    const doc = this.viewport.ownerDocument;
     this.viewport.addEventListener("wheel", this.onWheel, { passive: false });
-    this.viewport.addEventListener("mousedown", this.onMouseDown);
-    doc.addEventListener("mousemove", this.onMouseMove);
-    doc.addEventListener("mouseup", this.onMouseUp);
+    this.viewport.addEventListener("pointerdown", this.onPointerDown);
+    this.viewport.addEventListener("pointermove", this.onPointerMove);
+    this.viewport.addEventListener("pointerup", this.onPointerUp);
+    this.viewport.addEventListener("pointercancel", this.onPointerUp);
   }
   onClose() {
-    const doc = this.viewport.ownerDocument;
-    doc.removeEventListener("mousemove", this.onMouseMove);
-    doc.removeEventListener("mouseup", this.onMouseUp);
+    if (this.plugin && this.plugin.activeModal === this)
+      this.plugin.activeModal = null;
+    this.pointers.clear();
+    this.pinch = null;
+    this.isDragging = false;
     this.contentEl.empty();
     this.scale = 1;
     this.panX = 0;
     this.panY = 0;
-    this.isDragging = false;
     this.sizeMode = "fit";
   }
   toggleSizeMode() {
@@ -341,10 +403,19 @@ var MermaidImageModal = class extends import_obsidian2.Modal {
     }
     return { width: 800, height: 600 };
   }
-  setZoom(scale) {
+  getSvgOrigin() {
     const rect = this.viewport.getBoundingClientRect();
-    const cx = rect.width / 2;
-    const cy = rect.height / 2;
+    const svgRect = this.svgEl.getBoundingClientRect();
+    return {
+      rect,
+      x: svgRect.left - rect.left - this.panX,
+      y: svgRect.top - rect.top - this.panY
+    };
+  }
+  setZoom(scale) {
+    const origin = this.getSvgOrigin();
+    const cx = origin.rect.width / 2 - origin.x;
+    const cy = origin.rect.height / 2 - origin.y;
     this.panX = cx - (cx - this.panX) * (scale / this.scale);
     this.panY = cy - (cy - this.panY) * (scale / this.scale);
     this.scale = scale;
@@ -383,6 +454,7 @@ var MermaidImageModal = class extends import_obsidian2.Modal {
       link.click();
     } catch (e) {
       console.error("Failed to convert SVG to PNG:", e);
+      new import_obsidian2.Notice(this.t("downloadFailed"), 5000);
     }
     btn.setText(this.t("downloadPng"));
     btn.disabled = false;
@@ -391,23 +463,31 @@ var MermaidImageModal = class extends import_obsidian2.Modal {
     const cloned = this.svg.cloneNode(true);
     const viewBox = cloned.getAttribute("viewBox");
     if (viewBox) {
-      const parts = viewBox.split(/\s+/).map(Number);
-      if (parts.length === 4) {
+      const parts = viewBox.trim().split(/[\s,]+/).map(Number);
+      if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
         cloned.setAttribute("width", String(parts[2]));
         cloned.setAttribute("height", String(parts[3]));
       }
     }
+    cloned.removeAttribute("style");
     const serializer = new XMLSerializer();
     const svgString = serializer.serializeToString(cloned);
     const dataUrl = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgString);
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
+        const w = img.naturalWidth || img.width;
+        const h = img.naturalHeight || img.height;
+        if (!w || !h) {
+          reject(new Error("Invalid SVG size"));
+          return;
+        }
         const doc = this.contentEl.ownerDocument;
         const canvas = doc.createElement("canvas");
-        const pxRatio = 2;
-        canvas.width = img.width * pxRatio;
-        canvas.height = img.height * pxRatio;
+        const maxSide = Math.max(w, h);
+        const pxRatio = Math.min(2, 8192 / Math.max(maxSide, 1));
+        canvas.width = Math.round(w * pxRatio);
+        canvas.height = Math.round(h * pxRatio);
         const ctx = canvas.getContext("2d");
         if (!ctx) {
           reject(new Error("Failed to get canvas context"));
@@ -415,7 +495,7 @@ var MermaidImageModal = class extends import_obsidian2.Modal {
         }
         ctx.scale(pxRatio, pxRatio);
         ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, img.width, img.height);
+        ctx.fillRect(0, 0, w, h);
         ctx.drawImage(img, 0, 0);
         resolve(canvas.toDataURL("image/png"));
       };
@@ -432,6 +512,8 @@ var BetterMermaidPlugin = class extends import_obsidian3.Plugin {
   constructor() {
     super(...arguments);
     this.cssSheet = null;
+    this.cssStyleEl = null;
+    this.activeModal = null;
   }
   async onload() {
     await this.loadSettings();
@@ -443,23 +525,31 @@ var BetterMermaidPlugin = class extends import_obsidian3.Plugin {
       (evt) => {
         if (!this.settings.enableClickToZoom)
           return;
+        if (evt.ctrlKey || evt.metaKey || evt.shiftKey || evt.altKey)
+          return;
         const target = evt.target;
         const mermaidContainer = target.closest("div.mermaid");
         if (!mermaidContainer)
           return;
+        if (mermaidContainer.closest(".cm-editor") && !mermaidContainer.closest(".markdown-embed"))
+          return;
+        const doc = this.app.workspace.containerEl.ownerDocument;
+        if (doc.querySelector(".better-mermaid-modal-size"))
+          return;
         const mermaidSvg = mermaidContainer.querySelector("svg");
         if (!mermaidSvg)
           return;
-        new MermaidImageModal(
-          this.app,
-          mermaidSvg,
-          this.settings
-        ).open();
+        this.activeModal = new MermaidImageModal(this.app, this, mermaidSvg, this.settings);
+        this.activeModal.open();
       },
       true
     );
   }
   onunload() {
+    if (this.activeModal) {
+      this.activeModal.close();
+      this.activeModal = null;
+    }
     this.removeCSS();
   }
   async loadSettings() {
@@ -485,24 +575,36 @@ var BetterMermaidPlugin = class extends import_obsidian3.Plugin {
     const allCss = sizing + "\n" + (this.settings.customCss || "");
     if (!allCss.trim())
       return;
+    const doc = this.app.workspace.containerEl.ownerDocument;
     try {
-      this.cssSheet = new CSSStyleSheet();
-      this.cssSheet.replaceSync(allCss);
-      const doc = this.app.workspace.containerEl.ownerDocument;
-      doc.adoptedStyleSheets = [
-        ...doc.adoptedStyleSheets,
-        this.cssSheet
-      ];
+      if (typeof CSSStyleSheet === "function" && typeof CSSStyleSheet.prototype.replaceSync === "function" && "adoptedStyleSheets" in Document.prototype) {
+        this.cssSheet = new CSSStyleSheet();
+        this.cssSheet.replaceSync(allCss);
+        doc.adoptedStyleSheets = [
+          ...doc.adoptedStyleSheets,
+          this.cssSheet
+        ];
+        return;
+      }
     } catch (e) {
+      console.warn("Better Mermaid: CSSStyleSheet unavailable, falling back to <style> element.", e);
     }
+    this.cssStyleEl = doc.createElement("style");
+    this.cssStyleEl.setAttribute("data-better-mermaid", "true");
+    this.cssStyleEl.textContent = allCss;
+    doc.head.appendChild(this.cssStyleEl);
   }
   removeCSS() {
+    const doc = this.app.workspace.containerEl.ownerDocument;
     if (this.cssSheet) {
-      const doc = this.app.workspace.containerEl.ownerDocument;
       doc.adoptedStyleSheets = Array.from(
         doc.adoptedStyleSheets
       ).filter((s) => s !== this.cssSheet);
       this.cssSheet = null;
+    }
+    if (this.cssStyleEl) {
+      this.cssStyleEl.remove();
+      this.cssStyleEl = null;
     }
   }
 };

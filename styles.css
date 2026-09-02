@@ -29,6 +29,9 @@ div.mermaid {
   justify-content: center;
   cursor: grab;
   background: var(--background-primary);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .better-mermaid-viewport.better-mermaid-grabbing {
