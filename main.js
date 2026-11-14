@@ -302,6 +302,7 @@ var MermaidImageModal = class extends import_obsidian2.Modal {
     contentEl.empty();
     contentEl.addClass("better-mermaid-modal");
     this.svgEl = this.svg.cloneNode(true);
+    this.copyPeleTheme(this.svg, this.svgEl);
     this.svgEl.addClass("better-mermaid-svg");
     this.viewport = contentEl.createDiv({ cls: "better-mermaid-viewport" });
     this.viewport.appendChild(this.svgEl);
@@ -339,6 +340,43 @@ var MermaidImageModal = class extends import_obsidian2.Modal {
     this.viewport.addEventListener("pointermove", this.onPointerMove);
     this.viewport.addEventListener("pointerup", this.onPointerUp);
     this.viewport.addEventListener("pointercancel", this.onPointerUp);
+  }
+  copyPeleTheme(source, target) {
+    const computed = getComputedStyle(source);
+    const variables = [
+      "--pele-bg",
+      "--pele-fg",
+      "--pele-fg-on-light",
+      "--pele-fg-on-dark",
+      "--pele-muted",
+      "--pele-line",
+      "--pele-surface",
+      "--pele-surface-alt",
+      "--pele-border",
+      "--pele-accent",
+      "--pele-critical",
+      "--pele-error",
+      "--pele-font",
+      "--pele-font-mono",
+      "--pele-title-weight",
+      "--pele-heading-weight",
+      "--pele-bold-weight",
+      "--pele-radius",
+      "--pele-series-1",
+      "--pele-series-2",
+      "--pele-series-3",
+      "--pele-series-4",
+      "--pele-series-5",
+      "--pele-series-6",
+      "--pele-series-7",
+      "--pele-series-8"
+    ];
+    for (const variable of variables) {
+      const value = computed.getPropertyValue(variable).trim();
+      if (value)
+        target.style.setProperty(variable, value);
+    }
+    return computed.getPropertyValue("--pele-bg").trim();
   }
   onClose() {
     if (this.plugin && this.plugin.activeModal === this)
@@ -469,7 +507,10 @@ var MermaidImageModal = class extends import_obsidian2.Modal {
         cloned.setAttribute("height", String(parts[3]));
       }
     }
-    cloned.removeAttribute("style");
+    const backgroundColor = this.copyPeleTheme(this.svg, cloned);
+    cloned.style.removeProperty("max-width");
+    cloned.style.removeProperty("width");
+    cloned.style.removeProperty("height");
     const serializer = new XMLSerializer();
     const svgString = serializer.serializeToString(cloned);
     const dataUrl = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgString);
@@ -494,7 +535,7 @@ var MermaidImageModal = class extends import_obsidian2.Modal {
           return;
         }
         ctx.scale(pxRatio, pxRatio);
-        ctx.fillStyle = "#ffffff";
+        ctx.fillStyle = backgroundColor || "#ffffff";
         ctx.fillRect(0, 0, w, h);
         ctx.drawImage(img, 0, 0);
         resolve(canvas.toDataURL("image/png"));
@@ -530,6 +571,9 @@ var BetterMermaidPlugin = class extends import_obsidian3.Plugin {
         const target = evt.target;
         const mermaidContainer = target.closest("div.mermaid");
         if (!mermaidContainer)
+          return;
+        const link = target.closest("a");
+        if (link && mermaidContainer.contains(link))
           return;
         if (mermaidContainer.closest(".cm-editor") && !mermaidContainer.closest(".markdown-embed"))
           return;

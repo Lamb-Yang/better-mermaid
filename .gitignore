@@ -1,0 +1,11 @@
+# Obsidian local vault metadata
+.obsidian/
+
+# Dependencies
+node_modules/
+
+# Local backup of the bundled plugin
+main.js.bak
+
+# macOS
+.DS_Store
